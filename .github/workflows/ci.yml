@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: jobs
+          POSTGRES_PASSWORD: jobs
+          POSTGRES_DB: jobs
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U jobs"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy
+      - name: Unit, API, worker and chaos tests
+        run: pytest
+      - name: Soak test (smaller than the 2000-job local run)
+        run: SOAK_JOBS=300 SOAK_WORKERS=4 pytest -m soak tests/test_soak.py

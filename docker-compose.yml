@@ -1,0 +1,62 @@
+x-app: &app
+  build: .
+  environment:
+    DATABASE_URL: postgresql+psycopg://jobs:jobs@db:5432/jobs
+    PARTNER_API_URL: http://partner:9000
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: jobs
+      POSTGRES_PASSWORD: jobs
+      POSTGRES_DB: jobs
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobs -d jobs"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # One-shot: bring the schema up to date, then exit. api and workers wait for it.
+  migrate:
+    <<: *app
+    command: alembic upgrade head
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: uvicorn app.api:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *app
+    command: python -m app.worker
+    deploy:
+      replicas: 3
+    # SIGTERM lets a worker finish its current job; give it time before docker sends SIGKILL.
+    stop_grace_period: 40s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      partner:
+        condition: service_started
+
+  # Stand-in for the mentor's partner API: slow, fails randomly, records everything it receives.
+  partner:
+    <<: *app
+    command: uvicorn partner_mock.main:app --host 0.0.0.0 --port 9000
+    ports:
+      - "9000:9000"
+
+volumes:
+  pgdata:
