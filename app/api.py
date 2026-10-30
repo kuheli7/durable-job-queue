@@ -55,7 +55,7 @@ def submit_job(
             payload=body.payload,
             priority=body.priority,
             run_at=body.run_at,
-            max_attempts=spec.max_attempts,
+            max_attempts=spec.max_attempts if body.max_attempts is None else body.max_attempts,
             idempotency_key=key,
             request_hash=queue.fingerprint(sent),
         )

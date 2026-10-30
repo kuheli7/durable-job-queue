@@ -38,6 +38,25 @@ def test_validation(client: TestClient) -> None:
     assert client.get("/jobs/not-a-uuid").status_code == 422
 
 
+def test_max_attempts_can_be_set_per_job(client: TestClient) -> None:
+    default = client.post("/jobs", json={"name": "echo"}).json()
+    custom = client.post("/jobs", json={"name": "echo", "max_attempts": 2}).json()
+    assert (default["max_attempts"], custom["max_attempts"]) == (5, 2)
+    assert client.post("/jobs", json={"name": "echo", "max_attempts": 0}).status_code == 422
+    assert client.post("/jobs", json={"name": "echo", "max_attempts": 21}).status_code == 422
+
+    # it is part of "the same request": reusing a key with a different value is a conflict
+    key = {"Idempotency-Key": "ma"}
+    assert (
+        client.post("/jobs", json={"name": "echo", "max_attempts": 2}, headers=key).status_code
+        == 201
+    )
+    assert (
+        client.post("/jobs", json={"name": "echo", "max_attempts": 3}, headers=key).status_code
+        == 409
+    )
+
+
 def test_run_at_without_timezone_is_read_as_utc(client: TestClient) -> None:
     r = client.post("/jobs", json={"name": "echo", "run_at": "2031-01-01T10:00:00"})
     assert r.status_code == 201 and r.json()["run_at"].startswith("2031-01-01T10:00:00")

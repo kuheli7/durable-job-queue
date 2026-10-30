@@ -12,6 +12,7 @@ class JobIn(BaseModel):
     payload: dict[str, Any] = {}
     priority: int = Field(default=0, ge=-100, le=100)  # higher runs first
     run_at: datetime | None = None
+    max_attempts: int | None = Field(default=None, ge=1, le=20)  # None = the job type's default
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
 
     @field_validator("run_at")

@@ -33,7 +33,8 @@ curl -X POST localhost:8000/jobs/<id>/retry   # extra: give a failed job a fresh
 ```
 
 Fields: `name` (job type), `payload` (JSON object), `priority` (-100..100, higher first, default 0),
-`run_at` (ISO-8601; no timezone means UTC; omitted means now).
+`run_at` (ISO-8601; no timezone means UTC; omitted means now),
+`max_attempts` (1..20; omitted means the job type's default, 5 for `echo`, 6 for `call_partner`).
 Statuses: `queued`, `running`, `succeeded`, `failed`.
 Job types live in `app/handlers.py`: `echo` and `call_partner`.
 

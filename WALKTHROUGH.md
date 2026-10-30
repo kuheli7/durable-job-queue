@@ -50,7 +50,7 @@ jobs, and comparing what the queue says with what the partner API actually recei
 
 | Change | Where |
 |---|---|
-| Per-job `max_attempts` | `JobIn` in `app/schemas.py`, `submit` call in `app/api.py` (the row column already exists). The fingerprint in `api.py` is built from whatever fields the client sent (`model_fields_set`), so a new `JobIn` field is automatically part of the "same request?" check: a replay with a different value gives 409. Good thing to mention |
+| Per-job `max_attempts` (already done, as a model for the others) | `JobIn.max_attempts` in `app/schemas.py`, used in `submit_job` in `app/api.py`; test: `test_max_attempts_can_be_set_per_job`. The fingerprint is built from whatever fields the client sent (`model_fields_set`), so the new field is automatically part of the "same request?" check: a replay with a different value gives 409. |
 | Cancel a job | new `queue.cancel` (`UPDATE ... WHERE status IN ('queued','running')`), new route in `app/api.py`. A new `cancelled` status touches: the check constraint (new migration), `app/models.py` constants, `JobCounts`/`stats` and `StatsOut`. Cancelling a *running* job is safe: the worker's later `complete` matches 0 rows (fencing), though its side effect may already have happened |
 | Change backoff (linear, fixed) | `queue.backoff_delay` only (and its test) |
 | Different priority order | `ORDER BY` in `queue.claim` and the partial index in the migration |
