@@ -57,6 +57,13 @@ def test_max_attempts_can_be_set_per_job(client: TestClient) -> None:
     )
 
 
+def test_oversized_payload_is_rejected(client: TestClient) -> None:
+    small = {"name": "echo", "payload": {"blob": "x" * 900_000}}
+    big = {"name": "echo", "payload": {"blob": "x" * 1_100_000}}
+    assert client.post("/jobs", json=small).status_code == 201
+    assert client.post("/jobs", json=big).status_code == 422
+
+
 def test_run_at_without_timezone_is_read_as_utc(client: TestClient) -> None:
     r = client.post("/jobs", json={"name": "echo", "run_at": "2031-01-01T10:00:00"})
     assert r.status_code == 201 and r.json()["run_at"].startswith("2031-01-01T10:00:00")

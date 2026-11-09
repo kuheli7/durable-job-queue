@@ -32,7 +32,7 @@ curl 'localhost:8000/jobs?status=failed' # extra: the inbox of jobs a human must
 curl -X POST localhost:8000/jobs/<id>/retry   # extra: give a failed job a fresh retry budget
 ```
 
-Fields: `name` (job type), `payload` (JSON object), `priority` (-100..100, higher first, default 0),
+Fields: `name` (job type), `payload` (JSON object, at most 1 MB), `priority` (-100..100, higher first, default 0),
 `run_at` (ISO-8601; no timezone means UTC; omitted means now),
 `max_attempts` (1..20; omitted means the job type's default, 5 for `echo`, 6 for `call_partner`).
 Statuses: `queued`, `running`, `succeeded`, `failed`.

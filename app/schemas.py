@@ -1,8 +1,11 @@
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+MAX_PAYLOAD_BYTES = 1_000_000  # DESIGN.md assumes payloads under 1 MB; it is stored in the row
 
 
 class JobIn(BaseModel):
@@ -14,6 +17,13 @@ class JobIn(BaseModel):
     run_at: datetime | None = None
     max_attempts: int | None = Field(default=None, ge=1, le=20)  # None = the job type's default
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @field_validator("payload")
+    @classmethod
+    def payload_not_too_big(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if len(json.dumps(value)) > MAX_PAYLOAD_BYTES:
+            raise ValueError(f"payload is larger than {MAX_PAYLOAD_BYTES} bytes")
+        return value
 
     @field_validator("run_at")
     @classmethod
