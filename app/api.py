@@ -3,6 +3,8 @@ from collections.abc import Iterator
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app import queue
@@ -102,3 +104,13 @@ def retry_job(job_id: uuid.UUID, session: SessionDep) -> Job:
 @app.get("/stats", response_model=StatsOut)
 def read_stats(session: SessionDep) -> dict[str, object]:
     return queue.stats(session, settings.lag_threshold_seconds)
+
+
+@app.get("/health")
+def health(session: SessionDep) -> dict[str, str]:
+    """Liveness check for load balancers and docker: 200 if the database answers, else 503."""
+    try:
+        session.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        raise HTTPException(503, "database unreachable") from None
+    return {"status": "ok"}

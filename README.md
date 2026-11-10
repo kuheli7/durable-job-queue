@@ -28,6 +28,7 @@ curl -i -X POST localhost:8000/jobs -H 'content-type: application/json' \
 
 curl localhost:8000/jobs/<id>            # status, attempts, result, last_error
 curl localhost:8000/stats                # counts, backlog, oldest waiting job, expired leases, health
+curl localhost:8000/health               # extra: 200 if the database answers, 503 if not
 curl 'localhost:8000/jobs?status=failed' # extra: the inbox of jobs a human must look at
 curl -X POST localhost:8000/jobs/<id>/retry   # extra: give a failed job a fresh retry budget
 ```

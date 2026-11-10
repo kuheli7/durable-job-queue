@@ -135,3 +135,8 @@ def test_stats(client: TestClient) -> None:
     body = s.json()
     assert body["jobs"] == {"queued": 1, "running": 0, "succeeded": 0, "failed": 0}
     assert body["health"] == "ok" and body["ready_now"] == 1
+
+
+def test_health_is_ok_when_the_database_answers(client: TestClient) -> None:
+    r = client.get("/health")
+    assert r.status_code == 200 and r.json() == {"status": "ok"}
