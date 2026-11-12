@@ -6,9 +6,10 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.api import app
+from app.api import app, get_session
 
 
 @pytest.fixture()
@@ -140,3 +141,19 @@ def test_stats(client: TestClient) -> None:
 def test_health_is_ok_when_the_database_answers(client: TestClient) -> None:
     r = client.get("/health")
     assert r.status_code == 200 and r.json() == {"status": "ok"}
+
+
+class DeadSession:
+    """Stands in for a session whose database has gone away."""
+
+    def execute(self, *_args: object, **_kwargs: object) -> None:
+        raise OperationalError("SELECT 1", {}, Exception("connection refused"))
+
+
+def test_health_is_503_when_the_database_is_down(client: TestClient) -> None:
+    app.dependency_overrides[get_session] = DeadSession
+    try:
+        r = client.get("/health")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 503 and "database" in r.json()["detail"]
