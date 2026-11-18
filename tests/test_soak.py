@@ -20,20 +20,12 @@ def test_soak(engine: Engine, tmp_path: Path) -> None:
     report = run_scenario(
         engine,
         tmp_path,
-        partner_env={
-            "LATENCY_MIN": "0.02",
-            "LATENCY_MAX": "0.1",
-            "FAIL_RATE": "0.2",
-            "LOST_RESPONSE_RATE": "0.05",
-            "DEDUPE": "1",
-        },
+        partner_env={},  # the mentor's mock at its default settings
         n_jobs=n_jobs,
         n_workers=int(os.environ.get("SOAK_WORKERS", "6")),
         kill_interval=(0.5, 1.5),
         poison_every=poison_every,
-        timeout=900,
+        timeout=1800,
     )
     print(report)
-    assert_guarantees(
-        report, n_jobs=n_jobs, n_poison=len(range(0, n_jobs, poison_every)), dedupe=True
-    )
+    assert_guarantees(report, n_jobs=n_jobs, n_poison=len(range(0, n_jobs, poison_every)))

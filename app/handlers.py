@@ -42,6 +42,11 @@ class HandlerSpec:
     timeout_seconds: float = 120
 
 
+def always_fail(ctx: JobContext) -> dict[str, Any]:
+    """Demo job type that never succeeds: shows retries, the `failed` inbox and a human retry."""
+    raise RuntimeError("always_fail never succeeds")
+
+
 def echo(ctx: JobContext) -> dict[str, Any]:
     """Trivial job type for demos and smoke tests."""
     return {"echo": ctx.payload, "attempt": ctx.attempt}
@@ -54,8 +59,8 @@ def call_partner(ctx: JobContext) -> dict[str, Any]:
     """
     settings = Settings.from_env()
     response = httpx.post(
-        f"{settings.partner_url}/v1/send",
-        json=ctx.payload,
+        f"{settings.partner_url}/v1/deliver",
+        json={"job_id": str(ctx.job_id), "payload": ctx.payload},
         headers={"Idempotency-Key": ctx.idempotency_key},
         timeout=settings.partner_timeout_seconds,
     )
@@ -72,5 +77,6 @@ def call_partner(ctx: JobContext) -> dict[str, Any]:
 
 REGISTRY: dict[str, HandlerSpec] = {
     "echo": HandlerSpec(echo),
+    "always_fail": HandlerSpec(always_fail, max_attempts=3),
     "call_partner": HandlerSpec(call_partner, max_attempts=6, timeout_seconds=60),
 }

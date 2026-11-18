@@ -1,40 +1,34 @@
 """CHAOS TEST: real processes, workers are SIGKILLed while they hold a job.
 
-Run twice: against a partner that honours the Idempotency-Key and against one that does not.
+The partner is the mentor's mock API. Its failure rates are turned up (through its own settings)
+so that a short run reliably hits the dangerous case: the partner did the work, but the caller
+never saw a success.
 """
 
 from pathlib import Path
 
-import pytest
 from sqlalchemy import Engine
 
 from tests.harness import assert_guarantees, run_scenario
 
 
-@pytest.mark.parametrize(
-    "dedupe", [True, False], ids=["partner-dedupes", "partner-does-not-dedupe"]
-)
-def test_killing_workers_mid_job_loses_nothing(
-    engine: Engine, tmp_path: Path, dedupe: bool
-) -> None:
+def test_killing_workers_mid_job_loses_nothing(engine: Engine, tmp_path: Path) -> None:
     n_jobs, poison_every = 30, 10
     report = run_scenario(
         engine,
         tmp_path,
         partner_env={
-            "LATENCY_MIN": "0.4",
-            "LATENCY_MAX": "0.9",
-            "FAIL_RATE": "0.15",
-            "LOST_RESPONSE_RATE": "0.3",
-            "DEDUPE": "1" if dedupe else "0",
+            "MOCK_SEED": "7",
+            "MOCK_P_ERROR_BEFORE": "0.10",
+            "MOCK_P_ERROR_AFTER": "0.25",
+            "MOCK_P_HANG_AFTER": "0.05",
+            "MOCK_P_SLOW": "0.10",
         },
         n_jobs=n_jobs,
         n_workers=4,
         kill_interval=(0.6, 1.2),
         poison_every=poison_every,
-        timeout=180,
+        timeout=240,
     )
     print(report)
-    assert_guarantees(
-        report, n_jobs=n_jobs, n_poison=len(range(0, n_jobs, poison_every)), dedupe=dedupe
-    )
+    assert_guarantees(report, n_jobs=n_jobs, n_poison=len(range(0, n_jobs, poison_every)))

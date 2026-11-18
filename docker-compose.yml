@@ -51,12 +51,15 @@ services:
       partner:
         condition: service_started
 
-  # Stand-in for the mentor's partner API: slow, fails randomly, records everything it receives.
+  # The mentor's mock partner API (unmodified, in ./mock_partner_api): slow, fails randomly, and
+  # keeps an honest log of what it really did. GET http://localhost:9000/audit. Run exactly one.
   partner:
-    <<: *app
-    command: uvicorn partner_mock.main:app --host 0.0.0.0 --port 9000
+    build: ./mock_partner_api
     ports:
       - "9000:9000"
+    volumes:
+      - partner_data:/data
 
 volumes:
   pgdata:
+  partner_data:

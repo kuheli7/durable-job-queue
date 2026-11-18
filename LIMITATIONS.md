@@ -4,8 +4,10 @@
    Replication/backups are out of scope. "No job lost" means: no job is lost by *this system's*
    crashes, worker crashes or retries.
 2. **Duplicate side effects are possible if the partner does not honour the idempotency key.**
-   Handlers run at-least-once. The chaos test runs with the partner's de-duplication off and shows
-   2-3 effects for some jobs; with it on there are none. Nothing in a queue can fix that.
+   Handlers run at-least-once. The mentor's mock honours `Idempotency-Key`, so the chaos and soak
+   tests show 0 duplicate effects. I no longer test the case of a partner that ignores the key
+   (my earlier stand-in did: 2-3 effects for some jobs); that case follows from at-least-once but is
+   not proven by a test against her mock. Nothing in a queue can fix that.
 3. **Crashes use up attempts.** A job whose worker keeps dying (or that keeps exceeding the lease)
    goes to `failed` after `max_attempts`, even if the handler never reported an error. Good for
    poison jobs; under sustained crashes, innocent jobs can land in the human inbox too (never lost).
@@ -20,9 +22,10 @@
 8. **No retention.** Succeeded jobs are kept forever. There is no cleanup job.
 9. **Thin history.** Only the latest error is kept (`last_error`), not one row per attempt.
 10. **No authentication, rate limiting or per-type concurrency limits.** Assumes a trusted network.
-    Many workers can hit a rate-limited partner at once.
+    Many workers can hit a rate-limited partner at once, and a `429`'s `Retry-After` is not read:
+    the job just uses the normal backoff.
 11. **No cancel** for queued jobs, and `max_attempts` is a per-type setting, not per submission.
 12. **Unverified assumptions about the brief:** status names, field names, the `/stats` shape and the
-    real partner's contract (my partner is a stand-in I wrote). See DESIGN.md section 6.
+    real partner's contract beyond what `mock_partner_api/README.md` says. See DESIGN.md section 6.
 13. **`now()` is frozen per transaction.** Fine here because every claim/update runs in its own short
     transaction, but a long-lived transaction would see stale time.

@@ -24,7 +24,10 @@ from typing import Any
 import httpx
 from sqlalchemy import Engine, text
 
+from app.handlers import REGISTRY
+
 ROOT = Path(__file__).resolve().parent.parent
+PARTNER_DIR = ROOT / "mock_partner_api"  # the mentor's mock, run exactly as she ships it
 
 
 def free_port() -> int:
@@ -60,29 +63,33 @@ class Cluster:
         self.api_url = f"http://127.0.0.1:{free_port()}"
         self._others: list[subprocess.Popen[bytes]] = []
 
-    def _spawn(self, args: list[str], env: dict[str, str], logname: str) -> subprocess.Popen[bytes]:
+    def _spawn(
+        self, args: list[str], env: dict[str, str], logname: str, cwd: Path = ROOT
+    ) -> subprocess.Popen[bytes]:
         log = self._logs.enter_context((self.tmp / logname).open("wb"))
         return subprocess.Popen(
             [sys.executable, *args],
-            cwd=ROOT,
+            cwd=cwd,
             env={**os.environ, **env},
             stdout=log,
             stderr=subprocess.STDOUT,
         )
 
     def start(self) -> None:
+        # cwd is the mock's folder so that `app` means ITS app.py, not our app/ package
         partner = self._spawn(
             [
                 "-m",
                 "uvicorn",
-                "partner_mock.main:app",
+                "app:app",
                 "--port",
                 self.partner_url.rsplit(":", 1)[1],
                 "--log-level",
                 "warning",
             ],
-            self.partner_env,
+            {**self.partner_env, "MOCK_EFFECTS_FILE": str(self.tmp / "effects.jsonl")},
             "partner.log",
+            cwd=PARTNER_DIR,
         )
         self._others.append(partner)
         api = self._spawn(
@@ -99,7 +106,7 @@ class Cluster:
             "api.log",
         )
         self._others.append(api)
-        wait_until_up(f"{self.partner_url}/admin/effects", partner)
+        wait_until_up(f"{self.partner_url}/audit", partner)
         wait_until_up(f"{self.api_url}/stats", api)
         for _ in range(self.n_workers):
             self.spawn_worker()
@@ -216,7 +223,7 @@ class Report:
     human_retried: int = 0
     succeeded_without_effect: list[str] = field(default_factory=list)
     effects_exceed_attempts: list[str] = field(default_factory=list)
-    unknown_partner_keys: list[str] = field(default_factory=list)
+    effects_for_unknown_jobs: int = 0  # partner effects that belong to no job in our database
     poison_wrongly_applied: list[str] = field(default_factory=list)
     poison_not_in_inbox: list[str] = field(default_factory=list)
     duplicate_effects: dict[str, int] = field(default_factory=dict)  # job id -> times applied (>1)
@@ -226,6 +233,7 @@ class Report:
     partner_replays: int = 0  # partner saw an idempotency key again and refused to apply twice
     partner_lost_responses: int = 0  # partner applied the effect, then answered with an error
     poison_retry_attempts_ok: bool = True
+    poison_retry_budget: int = REGISTRY["always_fail"].max_attempts
 
 
 def _drain(engine: Engine, deadline: float) -> list[str]:
@@ -270,8 +278,8 @@ def run_scenario(
 
         def post(i: int) -> tuple[int, int, str]:
             body: dict[str, Any] = {
-                "name": "call_partner",
-                "payload": {"n": i, "mock": "always_fail"} if i in poison_idx else {"n": i},
+                "name": "always_fail" if i in poison_idx else "call_partner",
+                "payload": {"n": i},
                 "priority": (i * 7) % 11
                 - 5,  # fixed per job: a retry must send the identical request
                 "idempotency_key": f"scenario-{i}",
@@ -326,25 +334,33 @@ def run_scenario(
             report.stuck += _drain(engine, deadline)
             after = api.get(f"/jobs/{one}").json()
             report.poison_retry_attempts_ok = (
-                after["status"] == "failed" and after["attempts"] == before + 6
+                after["status"] == "failed"
+                and after["attempts"] == before + report.poison_retry_budget
             )
 
-        # ---- 4. compare the queue's claims with what the partner actually received
-        effects: dict[str, int] = httpx.get(f"{cluster.partner_url}/admin/effects").json()
-        received: list[dict[str, Any]] = httpx.get(f"{cluster.partner_url}/admin/received").json()
-        outcomes = Counter(r["outcome"] for r in received)
-        report.partner_replays = outcomes["replayed"]
-        report.partner_lost_responses = outcomes["applied_but_error"]
+        # ---- 4. compare the queue's claims with what the partner actually received (its /audit)
+        audit: dict[str, Any] = httpx.get(f"{cluster.partner_url}/audit").json()
+        report.partner_replays = audit["deduplicated_by_key"]  # same key again: not applied twice
+        report.partner_lost_responses = (  # the effect ran, but the caller saw an error or a hang
+            audit["outcomes"].get("error_after", 0) + audit["outcomes"].get("hang_after", 0)
+        )
+        report.duplicate_effects = audit["duplicated_jobs"]
 
         with engine.connect() as conn:
             rows = conn.execute(text("SELECT id, status, attempts FROM jobs")).all()
         report.rows_in_db = len(rows)
-        known_keys = {f"job-{r.id}" for r in rows}
-        seen_keys = set(effects) | {str(r["key"]) for r in received}
-        report.unknown_partner_keys = sorted(seen_keys - known_keys)
+
+        def effects_of(job_id: str) -> int:
+            body = httpx.get(f"{cluster.partner_url}/audit/jobs/{job_id}", timeout=30).json()
+            return int(body["effects"])
+
+        job_ids = [str(r.id) for r in rows]
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            applied_by_job = dict(zip(job_ids, pool.map(effects_of, job_ids), strict=True))
+        report.effects_for_unknown_jobs = audit["total_effects"] - sum(applied_by_job.values())
         for r in rows:
             job_id = str(r.id)
-            applied = effects.get(f"job-{job_id}", 0)
+            applied = applied_by_job[job_id]
             if r.status == "succeeded":
                 report.succeeded += 1
                 if applied < 1:
@@ -353,8 +369,6 @@ def run_scenario(
                 report.failed_for_human += 1
             if applied > r.attempts:
                 report.effects_exceed_attempts.append(job_id)
-            if applied > 1:
-                report.duplicate_effects[job_id] = applied
             if job_id in poison_ids and applied:
                 report.poison_wrongly_applied.append(job_id)
             if job_id in chaos.victims and r.attempts <= chaos.victims[job_id]:
@@ -363,7 +377,7 @@ def run_scenario(
     return report
 
 
-def assert_guarantees(report: Report, *, n_jobs: int, n_poison: int, dedupe: bool) -> None:
+def assert_guarantees(report: Report, *, n_jobs: int, n_poison: int) -> None:
     """The claims of DESIGN.md, checked against what the partner really received."""
     # -- a client retrying a submission never creates a second job
     assert report.resubmits_not_deduplicated == []
@@ -379,7 +393,7 @@ def assert_guarantees(report: Report, *, n_jobs: int, n_poison: int, dedupe: boo
 
     # -- success means the partner really got it; nothing it got is unaccounted for
     assert report.succeeded_without_effect == []
-    assert report.unknown_partner_keys == []
+    assert report.effects_for_unknown_jobs == 0
     assert report.poison_wrongly_applied == []
     # -- delivery guarantee: an effect is repeated only by another attempt, never out of thin air
     assert report.effects_exceed_attempts == []
@@ -390,10 +404,6 @@ def assert_guarantees(report: Report, *, n_jobs: int, n_poison: int, dedupe: boo
     assert report.victims_not_rerun == [], "a job whose worker was killed was not attempted again"
     assert report.partner_lost_responses >= 1, "partner never applied-then-failed"
 
-    if dedupe:
-        # idempotency key + a partner that honours it = effectively exactly once
-        assert report.duplicate_effects == {}
-        assert report.partner_replays >= 1, "the idempotency key was never actually needed"
-    else:
-        # no help from the partner: duplicates DO happen. That is what 'at-least-once' means.
-        assert report.duplicate_effects != {}, "expected at least one duplicate delivery"
+    # -- the partner honours the idempotency key: repeated attempts must not repeat the effect
+    assert report.duplicate_effects == {}
+    assert report.partner_replays >= 1, "the idempotency key was never actually needed"

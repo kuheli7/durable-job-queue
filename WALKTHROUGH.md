@@ -23,16 +23,19 @@ jobs, and comparing what the queue says with what the partner API actually recei
 | Never-succeeding jobs are kept for a human | status `failed`; `GET /jobs?status=failed`; `POST /jobs/{id}/retry` (`queue.retry_failed`) | `test_human_retry_extends_budget_...`, `test_failed_jobs_can_be_listed_and_retried`, soak |
 | Submit retries never duplicate | `queue.submit`: unique index on `idempotency_key` + `INSERT ... ON CONFLICT DO NOTHING`; fingerprint gives 409 for a different request | `test_ten_concurrent_submits_with_one_key_make_exactly_one_job`, API tests, chaos |
 | Operators see health | `queue.stats` -> `GET /stats` (counts, backlog, oldest ready age, expired leases, `health` + reasons) | `test_stats_reports_health` |
-| No job lost, nothing double-counted, checked against the partner | `tests/harness.py::assert_guarantees` | `test_chaos.py` (dedupe on and off), `test_soak.py` |
+| No job lost, nothing double-counted, checked against the partner | `tests/harness.py::assert_guarantees` | `test_chaos.py`, `test_soak.py` (both read the mentor's mock `GET /audit`) |
 
 ## What the chaos/soak result means
 
-(Numbers are from one 2000-job, 6-worker soak run; yours will differ, the properties will not.)
+(Numbers are from one 2000-job, 6-worker soak run against the mentor's mock at its default settings; yours will differ, the properties will not.)
 
-* With the partner honouring the idempotency key: 0 duplicate effects, even after 277 kills in the 2000-job soak
-  (123 partner replays, 92 "applied but the answer was lost" cases).
-* With the partner **not** honouring it: some jobs got 2-3 effects. That is the honest cost of at-least-once,
-  and the test asserts it happens so you can see the difference.
+* The partner's own audit (`GET /audit`) shows **0 duplicate effects**, even after 524 worker kills
+  (430 of them proven to be in the middle of a job). The partner saw the same idempotency key again
+  435 times and refused to apply it twice; in 233 calls it did the work but the caller saw an error or a hang.
+* Every job that the queue calls `succeeded` has at least one effect at the partner, and the partner holds
+  no effect for a job we do not know about. 1980 jobs succeeded; the 20 `always_fail` jobs sit in the `failed` inbox.
+* Honest limit: the mock always honours the key, so the case of a partner that ignores it is explained, not tested
+  (LIMITATIONS.md item 2).
 * The test is not vacuous: the harness proves a worker held a `running` lease before killing it, and asserts
   that kills, victims, lost responses and replays actually occurred.
 

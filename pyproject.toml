@@ -20,11 +20,13 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["app", "partner_mock"]
+packages = ["app"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# the mentor's mock partner API is her code, kept as she sent it
+extend-exclude = ["mock_partner_api"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
@@ -32,7 +34,7 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["app", "partner_mock", "tests", "migrations"]
+files = ["app", "tests", "migrations"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

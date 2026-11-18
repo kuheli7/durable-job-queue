@@ -100,3 +100,16 @@ A job is **one row** in a `jobs` table. The row *is* the queue. There is nothing
 * **A separate `job_attempts` history table**: better forensics; I kept `attempts` + `last_error` to stay small. First thing to add if asked.
 * **A `workers` table / worker heartbeats**: lag (`oldest_ready_age`) and expired leases already reveal dead workers.
 * **Async SQLAlchemy**: worker handlers are blocking by nature; sync code is easier to explain and debug.
+
+## 8. Update after receiving the partner API (added later; sections 1-7 are unchanged)
+
+* The partner honours `Idempotency-Key` (its README says so), so the "may or may not" assumption in
+  section 5 is answered for the mock. It also sends `Retry-After` on `429`, answering question 2 in part
+  (I do not use `Retry-After` yet; see LIMITATIONS.md).
+* It can fail **after** doing the work (`500`, or a 30 s hang before replying). That is the window the
+  at-least-once guarantee exists for: the key makes the second attempt harmless.
+* Section 5 said the tests measure both cases. They now measure only the case with the key honoured
+  (the mock has no switch to turn that off). The no-key case is stated, not tested; see LIMITATIONS.md item 2.
+* The mock has no way to make a job fail forever, so I added a demo job type `always_fail`; the chaos and
+  soak tests use it as the job that must end up in the `failed` inbox.
+

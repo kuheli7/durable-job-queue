@@ -33,6 +33,18 @@ Teams need background work to run reliably: sending emails, resizing images, cal
 - Expect one requirement change mid-month.
 - You may use AI tools, but you must be able to explain and modify any line live.
 
+**Requirements:** nothing written.
+**Tags:** python, fastapi, postgres, backend
+
+## The partner API (as sent by the mentor)
+
+The mentor's mock is in `mock_partner_api/` (her `README.md` there is the reference). In short:
+`POST /v1/deliver` with `{"job_id", "payload"}` and an optional `Idempotency-Key` header; it rolls a
+random outcome (about 68% fine, 10% slow, 8% `429` with `Retry-After`, 5% `500` before the work,
+4% `500` after the work, 5% hangs 30 s after the work). `GET /audit` and `GET /audit/jobs/{job_id}` say
+how many times each job's effect really ran; `POST /admin/reset` clears the log. A failed or slow
+reply does not tell the caller whether the work happened. Run exactly one instance.
+
 ## Checklist
 
 | Requirement | Status | Where |
@@ -42,7 +54,7 @@ Teams need background work to run reliably: sending emails, resizing images, cal
 | Sensible retries; never-succeeding jobs kept for a human to inspect and retry | Done | backoff in `queue.fail`; `failed` status; `GET /jobs?status=failed`; `POST /jobs/{id}/retry` |
 | Client retry never creates two jobs | Done | `queue.submit` (unique key + `ON CONFLICT DO NOTHING`) |
 | Operators see health at a glance | Done | `GET /stats` (`health` ok/degraded with reasons); `GET /health` for liveness |
-| Job type that calls the partner API | Done, against my stand-in | `call_partner` in `app/handlers.py`; stand-in in `partner_mock/main.py`. **Replace with the mentor's mock when it arrives.** |
+| Job type that calls the partner API | Done, against the mentor's mock | `call_partner` in `app/handlers.py` -> `POST /v1/deliver`; the mock is in `mock_partner_api/` (unmodified) and is a compose service |
 | No job ever lost | Done, proven | chaos and soak tests assert nothing is stuck and every job is succeeded or kept as failed |
 | Delivery guarantee stated; what job authors must do | Done | `DESIGN.md` section 2 |
 | Chaos and soak tests checked against what the partner received | Done | `tests/harness.py::assert_guarantees`, `tests/test_chaos.py`, `tests/test_soak.py` |
@@ -56,4 +68,4 @@ Teams need background work to run reliably: sending emails, resizing images, cal
 | LIMITATIONS.md | Done | `LIMITATIONS.md` |
 | Live walkthrough with an on-the-spot change | **To do** | prep in `WALKTHROUGH.md` |
 | Mid-month requirement change | **To do** (not received yet) | will update `DESIGN.md`, tests and `LIMITATIONS.md` |
-| Real partner API from the mentor | **To do** (not received yet) | adapt `call_partner`, rerun chaos and soak |
+| Real partner API from the mentor | Done (received; `call_partner`, compose, chaos and soak now use it) | `mock_partner_api/`, `tests/harness.py` (checks `GET /audit`) |

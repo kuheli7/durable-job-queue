@@ -14,8 +14,9 @@ docker compose up --build
 ```
 
 This starts Postgres 15 (host port **5433**, to stay clear of a local Postgres on 5432), runs the
-migrations once, then starts the API (http://localhost:8000), **3 workers**, and a stand-in for the
-partner API (http://localhost:9000, slow and randomly failing). Interactive docs: http://localhost:8000/docs
+migrations once, then starts the API (http://localhost:8000), **3 workers**, and the mentor's mock
+partner API (`mock_partner_api/`, http://localhost:9000, slow and randomly failing; what it really
+received is at http://localhost:9000/audit). Interactive docs: http://localhost:8000/docs
 
 ## API
 
@@ -37,7 +38,9 @@ Fields: `name` (job type), `payload` (JSON object, at most 1 MB), `priority` (-1
 `run_at` (ISO-8601; no timezone means UTC; omitted means now),
 `max_attempts` (1..20; omitted means the job type's default, 5 for `echo`, 6 for `call_partner`).
 Statuses: `queued`, `running`, `succeeded`, `failed`.
-Job types live in `app/handlers.py`: `echo` and `call_partner`.
+Job types live in `app/handlers.py`: `echo`, `call_partner` (calls the partner's `POST /v1/deliver`
+with `Idempotency-Key: job-<id>`) and `always_fail` (a demo that never succeeds: it ends up in the
+`failed` inbox after 3 attempts).
 
 ## Configuration (environment variables)
 
@@ -51,9 +54,11 @@ Job types live in `app/handlers.py`: `echo` and `call_partner`.
 | `PARTNER_API_URL` / `PARTNER_TIMEOUT_SECONDS` | `http://localhost:9000` / 10 | partner client |
 | `LAG_THRESHOLD_SECONDS` | 30 | `/stats` says `degraded` if the oldest ready job waited longer |
 
-The partner stand-in takes `LATENCY_MIN`, `LATENCY_MAX`, `FAIL_RATE`, `LOST_RESPONSE_RATE`
-(applied, then answers 500), `DEDUPE` (honour the idempotency key or not) and `SEED`.
-Its `GET /admin/received` and `GET /admin/effects` are what the tests compare against.
+The mentor's mock is configured by its own `MOCK_*` variables (see `mock_partner_api/README.md`).
+Its `GET /audit` and `GET /audit/jobs/{id}` are what the tests compare against, and
+`POST /admin/reset` clears them (its log lives in the `partner_data` volume, so it survives restarts).
+`mock_partner_api/` is her code, kept as she sent it, and is excluded from ruff in `pyproject.toml`
+(a config exclusion; there are no inline suppressions anywhere).
 
 ## Develop and test
 
@@ -64,7 +69,7 @@ docker compose stop api worker partner               # keep ONLY the db up: see 
 docker compose up -d db                              # tests use the database on localhost:5433
 ruff check . && ruff format --check . && mypy        # clean, with no inline suppressions
 pytest                                               # unit, API, worker and chaos tests (~4 min)
-SOAK_JOBS=2000 SOAK_WORKERS=6 pytest -m soak         # soak: thousands of jobs, random kills (~6 min)
+SOAK_JOBS=2000 SOAK_WORKERS=6 pytest -m soak         # soak: thousands of jobs, random kills (~15 min against the mentor's mock)
 ```
 
 **The tests TRUNCATE the `jobs` table of the database on port 5433.** Run them with only the `db`
